@@ -4,7 +4,7 @@ A single self-contained HTML file (all CSS and JS inline, no dependencies, no bu
 
 It's a crowd evacuation simulator: tap "Sound Alarm" to watch 10 sped-up timelapse runs of people fleeing a room through its exits, reporting the average evacuation time.
 
-> **Note:** This is just a very small demo / example. A real version of this kind of project would of course not be built as a single HTML file — it's only meant to illustrate the idea.
+> **Note:** This is just a very small demo / example. The idea is to illustrate, at a very basic level, what the UI of such a tool could look and feel like — not how the project would actually be developed. A real version would of course not be built as a single HTML file.
 
 ## Run it
 
