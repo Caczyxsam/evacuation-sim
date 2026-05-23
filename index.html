@@ -2,10 +2,41 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta http-equiv="refresh" content="0; url=evacuation-sim.html">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Crowd Evacuation Simulator</title>
+<link rel="stylesheet" href="styles.css">
 </head>
 <body>
-<p>Redirecting to the <a href="evacuation-sim.html">Crowd Evacuation Simulator</a>…</p>
+<div class="wrap">
+  <h1>Crowd Evacuation Simulator</h1>
+  <p class="subtitle">Press the alarm and watch how the room evacuates through its active exits. You can deactivate an exit by pressing it before the alarm goes off and see how it affects the evacuation time.</p>
+
+  <div class="stage">
+    <canvas id="canvas"></canvas>
+    <div class="flash" id="flash"></div>
+  </div>
+
+  <div class="controls">
+    <button id="alarmBtn">🔔 SOUND ALARM</button>
+    <button id="resetBtn">↺ Reset</button>
+    <div class="stats">
+      <div class="stat"><span class="label">People remaining</span><span class="value" id="remaining">0</span></div>
+      <div class="stat"><span class="label">Run time</span><span class="value" id="timer">0.0s</span></div>
+    </div>
+  </div>
+
+  <div id="analysis"></div>
+  <div id="banner"></div>
+
+  <div class="legend">
+    <span><span class="dot" style="background:#3b82f6"></span> Idle / evacuating</span>
+    <span><span class="dot" style="background:#f1c40f"></span> In a crowd (slowed)</span>
+    <span><span class="dot" style="background:#e74c3c"></span> Stumbled (3s)</span>
+    <span><span class="swatch" style="background:#2ecc71"></span> Exit</span>
+    <span><span class="swatch" style="background:#8d6e63"></span> Furniture (obstacle)</span>
+  </div>
+</div>
+
+<script src="evacuation-sim.js"></script>
 </body>
 </html>

@@ -1,16 +1,16 @@
 # Crowd Evacuation Simulator
 
-A single self-contained HTML file (all CSS and JS inline, no dependencies, no build step) that runs a top-down crowd-evacuation demo on an HTML5 canvas.
+A small browser demo (no dependencies, no build step) that runs a top-down crowd-evacuation simulation on an HTML5 canvas. The markup lives in `index.html`, the styling in `styles.css`, and all of the logic in `evacuation-sim.js`.
 
 It's a crowd evacuation simulator: tap "Sound Alarm" to watch 10 sped-up timelapse runs of people fleeing a room through its exits, reporting the average evacuation time.
 
-> **Note:** This is just a very small demo / example. The idea is to illustrate, at a very basic level, what the UI of such a tool could look and feel like — not how the project would actually be developed. A real version would of course not be built as a single HTML file.
+> **Note:** This is just a very small demo / example. The idea is to illustrate, at a very basic level, what the UI of such a tool could look and feel like — not how the project would actually be developed. A real version would of course not be built as a handful of static front-end files like this.
 
 ## Run it
 
 Live demo: **https://caczyxsam.github.io/evacuation-sim/**
 
-Or open `evacuation-sim.html` in any modern browser — that's it.
+Or open `index.html` in any modern browser — that's it.
 
 ## Features
 
