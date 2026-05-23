@@ -6,12 +6,14 @@ It's a crowd evacuation simulator: tap "Sound Alarm" to watch 10 sped-up timelap
 
 ## Run it
 
-Open `evacuation-sim.html` in any modern browser — that's it.
+Live demo: **https://caczyxsam.github.io/evacuation-sim/**
+
+Or open `evacuation-sim.html` in any modern browser — that's it.
 
 ## Features
 
-- **15 × 10 m room** modelled on a 0.5 m grid, with perimeter walls and furniture (sofa, table, chairs, shelf) people route around.
-- **Three exits** (two 2 m, one 1 m). Click an exit before the alarm to close it and see how it changes the evacuation.
+- **Top-down room** with perimeter walls and furniture (sofa, table, chairs, shelf) people route around.
+- **Three exits.** Click an exit before the alarm to close it and see how it changes the evacuation.
 - **Idle behaviour:** people casually mill about or stand still until the alarm.
 - **Flow-field pathfinding:** a Dijkstra distance map routes everyone around walls and obstacles to the nearest exit.
 - **Crowd dynamics:** people jam at doorways, slow down (and turn yellow) when packed in, and occasionally stumble (turn red, freeze briefly).
