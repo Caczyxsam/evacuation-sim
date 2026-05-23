@@ -1,0 +1,802 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Crowd Evacuation Simulator</title>
+<style>
+  :root {
+    --floor: #f4f1ea;
+    --wall:  #3a3f4b;
+    --exit:  #2ecc71;
+    --bg:    #1b1e26;
+    --text:  #e8eaf0;
+    --muted: #9aa0ad;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  .wrap { max-width: 880px; margin: 0 auto; padding: 18px 16px 40px; }
+  h1 { margin: 0 0 4px; font-size: clamp(1.4rem, 4vw, 2rem); letter-spacing: 0.3px; }
+  .subtitle { margin: 0 0 16px; color: var(--muted); font-size: 0.95rem; }
+  .stage {
+    position: relative; width: 100%;
+    border-radius: 12px; overflow: hidden;
+    box-shadow: 0 6px 24px rgba(0,0,0,0.4); line-height: 0;
+  }
+  canvas { width: 100%; height: auto; display: block; background: var(--floor); touch-action: manipulation; }
+  /* Edge flash: a red inset glow that fades after the alarm */
+  .flash {
+    position: absolute; inset: 0; pointer-events: none;
+    box-shadow: inset 0 0 0 0 rgba(231,76,60,0);
+    transition: box-shadow 0.12s ease-out; border-radius: 12px;
+  }
+  .flash.on { box-shadow: inset 0 0 60px 18px rgba(231,76,60,0.85); transition: none; }
+  .controls { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin: 16px 0; }
+  button {
+    font: inherit; font-weight: 600; border: none; border-radius: 10px;
+    padding: 14px 22px; cursor: pointer; color: #fff;
+    transition: transform 0.06s ease, filter 0.15s ease, box-shadow 0.15s ease;
+  }
+  button:active { transform: translateY(1px) scale(0.99); }
+  button:disabled { opacity: 0.45; cursor: not-allowed; }
+  /* The alarm button is the visual focus while idle */
+  #alarmBtn {
+    background: linear-gradient(180deg, #ff5a5a, #e23b3b);
+    font-size: 1.15rem; padding: 16px 30px;
+    box-shadow: 0 4px 16px rgba(226,59,59,0.45);
+  }
+  #alarmBtn:not(:disabled) { animation: pulse 1.6s ease-in-out infinite; }
+  @keyframes pulse {
+    0%,100% { box-shadow: 0 4px 16px rgba(226,59,59,0.45); }
+    50%     { box-shadow: 0 4px 28px rgba(226,59,59,0.85); }
+  }
+  #resetBtn { background: #4b5161; }
+  #resetBtn:hover { filter: brightness(1.12); }
+  .stats { display: flex; flex-wrap: wrap; gap: 10px 28px; margin-left: auto; align-items: baseline; }
+  .stat .label { color: var(--muted); font-size: 0.8rem; display: block; }
+  .stat .value { font-size: 1.5rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+  /* Banner shown when everyone is out */
+  #banner {
+    margin: 4px 0 0; padding: 14px 18px; border-radius: 10px;
+    background: rgba(46,204,113,0.15); border: 1px solid rgba(46,204,113,0.5);
+    color: #5ff09a; font-weight: 700; font-size: 1.1rem; display: none;
+  }
+  #banner.show { display: block; }
+  /* Analysis result (average over many simulated runs) */
+  #analysis {
+    margin: 10px 0 0; padding: 14px 18px; border-radius: 10px;
+    background: rgba(59,130,246,0.14); border: 1px solid rgba(59,130,246,0.5);
+    color: #cfe0ff; font-size: 1.05rem; display: none;
+  }
+  #analysis.show { display: block; }
+  #analysis strong { font-size: 1.35rem; font-variant-numeric: tabular-nums; color: #fff; }
+  #analysis .range { color: var(--muted); font-size: 0.85rem; display: block; margin-top: 2px; }
+  .legend { display: flex; flex-wrap: wrap; gap: 16px; margin-top: 16px; color: var(--muted); font-size: 0.85rem; }
+  .legend span { display: inline-flex; align-items: center; gap: 6px; }
+  .swatch { width: 14px; height: 14px; border-radius: 4px; display: inline-block; }
+  .dot { width: 12px; height: 12px; border-radius: 50%; display: inline-block; }
+  /* Touch niceties: no blue tap flash, no accidental text selection on the UI */
+  button, .controls, .legend, .subtitle { -webkit-tap-highlight-color: transparent; }
+  .controls, .legend { user-select: none; -webkit-user-select: none; }
+  canvas { -webkit-user-select: none; user-select: none; }
+  /* Narrow / phone screens: let the buttons share the row and stats wrap below */
+  @media (max-width: 560px) {
+    .wrap { padding: 14px 12px 32px; }
+    .controls { gap: 10px; }
+    #alarmBtn { flex: 1 1 auto; font-size: 1.05rem; padding: 16px 18px; }
+    #resetBtn { flex: 0 0 auto; padding: 16px 18px; }
+    .stats { margin-left: 0; flex-basis: 100%; justify-content: space-between; gap: 8px 16px; }
+    .stat .value { font-size: 1.3rem; }
+    #analysis, #banner { font-size: 1rem; padding: 12px 14px; }
+    .legend { gap: 10px 14px; font-size: 0.8rem; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Crowd Evacuation Simulator</h1>
+  <p class="subtitle">Press the alarm and watch how the room evacuates through its active exits. You can deactivate an exit by pressing it before the alarm goes off and see how it affects the evacuation time.</p>
+
+  <div class="stage">
+    <canvas id="canvas"></canvas>
+    <div class="flash" id="flash"></div>
+  </div>
+
+  <div class="controls">
+    <button id="alarmBtn">🔔 SOUND ALARM</button>
+    <button id="resetBtn">↺ Reset</button>
+    <div class="stats">
+      <div class="stat"><span class="label">People remaining</span><span class="value" id="remaining">0</span></div>
+      <div class="stat"><span class="label">Run time</span><span class="value" id="timer">0.0s</span></div>
+    </div>
+  </div>
+
+  <div id="analysis"></div>
+  <div id="banner"></div>
+
+  <div class="legend">
+    <span><span class="dot" style="background:#3b82f6"></span> Idle / evacuating</span>
+    <span><span class="dot" style="background:#f1c40f"></span> In a crowd (slowed)</span>
+    <span><span class="dot" style="background:#e74c3c"></span> Stumbled (3s)</span>
+    <span><span class="swatch" style="background:#2ecc71"></span> Exit</span>
+    <span><span class="swatch" style="background:#8d6e63"></span> Furniture (obstacle)</span>
+  </div>
+</div>
+
+<script>
+"use strict";
+
+// ---------------------------------------------------------------------------
+// Scale: the room is 15 m wide × 10 m tall. We model it on a 0.5 m grid,
+// giving a 30 × 20 cell array, and render each cell at PX_PER_M * CELL_M px.
+// ---------------------------------------------------------------------------
+const ROOM_W_M = 15, ROOM_H_M = 10;     // physical room size in metres
+const CELL_M   = 0.5;                    // each grid cell is 0.5 m
+const COLS = ROOM_W_M / CELL_M;          // 30 columns
+const ROWS = ROOM_H_M / CELL_M;          // 20 rows
+const PX_PER_M = 52;                     // pixels per metre (drawing scale)
+const CELL = CELL_M * PX_PER_M;          // 26 px per cell
+
+// Cell types
+const FLOOR = 0, WALL = 1, OBSTACLE = 2;
+
+// ---------------------------------------------------------------------------
+// Exits: each is a gap in one wall. Easy to add more — just push to this list.
+//   side: which wall ('right' | 'left' | 'top' | 'bottom')
+//   from / to: inclusive cell range along that wall (rows for left/right,
+//              columns for top/bottom).
+// ---------------------------------------------------------------------------
+const exitDefs = [
+  { side: "right",  from: 8,  to: 11 },  // main exit, right wall  (2.0 m)
+  { side: "bottom", from: 6,  to: 9  },  // secondary exit, bottom (2.0 m)
+  { side: "top",    from: 14, to: 15 },  // small exit, top wall    (1.0 m)
+];
+
+// ---------------------------------------------------------------------------
+// Obstacles (furniture): rectangles in cell coordinates. People treat these
+// like walls and steer around them. Easy to add more — just push to this list.
+// ---------------------------------------------------------------------------
+const obstacles = [
+  { c0: 3,  r0: 3,  w: 5, h: 2, type: "sofa",  label: "Sofa"  },
+  { c0: 13, r0: 8,  w: 5, h: 4, type: "table", label: "Table" },
+  { c0: 11, r0: 9,  w: 1, h: 1, type: "chair" },
+  { c0: 19, r0: 9,  w: 1, h: 1, type: "chair" },
+  { c0: 22, r0: 3,  w: 1, h: 6, type: "shelf", label: "Shelf" },
+];
+
+// Exit geometry + open/closed state. Click an exit before the alarm to toggle.
+const exits = exitDefs.map(def => ({ side: def.side, from: def.from, to: def.to, enabled: true }));
+
+// ---------------------------------------------------------------------------
+// Build the grid: perimeter walls + stamped-in furniture. Exit gaps are then
+// carved (or sealed) by applyExits() according to each exit's enabled flag.
+// ---------------------------------------------------------------------------
+const grid = [];
+for (let r = 0; r < ROWS; r++) {
+  const row = [];
+  for (let c = 0; c < COLS; c++) {
+    const onPerimeter = (r === 0 || r === ROWS - 1 || c === 0 || c === COLS - 1);
+    row.push(onPerimeter ? WALL : FLOOR);
+  }
+  grid.push(row);
+}
+for (const o of obstacles)
+  for (let r = o.r0; r < o.r0 + o.h; r++)
+    for (let c = o.c0; c < o.c0 + o.w; c++)
+      grid[r][c] = OBSTACLE;
+
+// Set the perimeter cells of one exit to a given type (FLOOR = open, WALL = sealed).
+function setExitCells(ex, type) {
+  if (ex.side === "right")  for (let r = ex.from; r <= ex.to; r++) grid[r][COLS - 1] = type;
+  if (ex.side === "left")   for (let r = ex.from; r <= ex.to; r++) grid[r][0]        = type;
+  if (ex.side === "bottom") for (let c = ex.from; c <= ex.to; c++) grid[ROWS - 1][c] = type;
+  if (ex.side === "top")    for (let c = ex.from; c <= ex.to; c++) grid[0][c]        = type;
+}
+
+// Open enabled exits, seal disabled ones, then recompute routing.
+function applyExits() {
+  for (const ex of exits) setExitCells(ex, ex.enabled ? FLOOR : WALL);
+  buildFlowField();
+}
+
+// ---------------------------------------------------------------------------
+// Flow field: a distance-to-exit map computed once with Dijkstra over the
+// floor cells (walls and furniture are impassable). Every floor cell stores a
+// unit vector pointing "downhill" toward the nearest exit, so people route
+// AROUND obstacles the way someone who can see the room would — nobody walks
+// straight into the shelf and gets stuck.
+// ---------------------------------------------------------------------------
+const distField = new Array(COLS * ROWS).fill(Infinity);
+const flowField = new Array(COLS * ROWS).fill(null);
+const cellIdx = (c, r) => r * COLS + c;
+const isFloor = (c, r) => c >= 0 && c < COLS && r >= 0 && r < ROWS && grid[r][c] === FLOOR;
+
+// 8-directional neighbours: [dCol, dRow, stepCost]
+const NB = [[1,0,1],[-1,0,1],[0,1,1],[0,-1,1],[1,1,1.414],[1,-1,1.414],[-1,1,1.414],[-1,-1,1.414]];
+
+function buildFlowField() {
+  distField.fill(Infinity);
+
+  // Tiny binary min-heap of [dist, cellIndex] for Dijkstra.
+  const heap = [];
+  const push = (d, i) => {
+    heap.push([d, i]); let n = heap.length - 1;
+    while (n > 0) { const p = (n - 1) >> 1; if (heap[p][0] <= heap[n][0]) break; [heap[p], heap[n]] = [heap[n], heap[p]]; n = p; }
+  };
+  const pop = () => {
+    const top = heap[0], last = heap.pop();
+    if (heap.length) {
+      heap[0] = last; let n = 0;
+      for (;;) { let s = n; const l = 2*n+1, r = 2*n+2;
+        if (l < heap.length && heap[l][0] < heap[s][0]) s = l;
+        if (r < heap.length && heap[r][0] < heap[s][0]) s = r;
+        if (s === n) break; [heap[s], heap[n]] = [heap[n], heap[s]]; n = s; }
+    }
+    return top;
+  };
+  const seed = (c, r) => { const i = cellIdx(c, r); distField[i] = 0; push(0, i); };
+
+  // Sources: the open exit gap cells on the perimeter (disabled exits are sealed).
+  for (const ex of exits) {
+    if (!ex.enabled) continue;
+    if (ex.side === "right")  for (let r = ex.from; r <= ex.to; r++) seed(COLS - 1, r);
+    if (ex.side === "left")   for (let r = ex.from; r <= ex.to; r++) seed(0, r);
+    if (ex.side === "bottom") for (let c = ex.from; c <= ex.to; c++) seed(c, ROWS - 1);
+    if (ex.side === "top")    for (let c = ex.from; c <= ex.to; c++) seed(c, 0);
+  }
+
+  // Dijkstra outward over floor cells.
+  while (heap.length) {
+    const [d, i] = pop();
+    if (d > distField[i]) continue;
+    const c = i % COLS, r = (i - c) / COLS;
+    for (const [dc, dr, cost] of NB) {
+      const nc = c + dc, nr = r + dr;
+      if (!isFloor(nc, nr)) continue;
+      // don't cut diagonally through a wall/furniture corner
+      if (dc !== 0 && dr !== 0 && (!isFloor(c + dc, r) || !isFloor(c, r + dr))) continue;
+      const nd = d + cost, ni = cellIdx(nc, nr);
+      if (nd < distField[ni]) { distField[ni] = nd; push(nd, ni); }
+    }
+  }
+
+  // For every floor cell, point toward the lowest-distance reachable neighbour.
+  for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) {
+    if (!isFloor(c, r)) { flowField[cellIdx(c, r)] = null; continue; }
+    let best = distField[cellIdx(c, r)], bc = 0, br = 0;
+    for (const [dc, dr] of NB) {
+      const nc = c + dc, nr = r + dr;
+      if (!isFloor(nc, nr)) continue;
+      if (dc !== 0 && dr !== 0 && (!isFloor(c + dc, r) || !isFloor(c, r + dr))) continue;
+      const nd = distField[cellIdx(nc, nr)];
+      if (nd < best) { best = nd; bc = dc; br = dr; }
+    }
+    const len = Math.hypot(bc, br) || 1;
+    flowField[cellIdx(c, r)] = { x: bc / len, y: br / len };
+  }
+
+  // Open exit cells push people out through the doorway.
+  for (const ex of exits) {
+    if (!ex.enabled) continue;
+    const v = ex.side === "right" ? {x:1,y:0} : ex.side === "left" ? {x:-1,y:0}
+            : ex.side === "bottom" ? {x:0,y:1} : {x:0,y:-1};
+    if (ex.side === "right")  for (let r = ex.from; r <= ex.to; r++) flowField[cellIdx(COLS-1, r)] = v;
+    if (ex.side === "left")   for (let r = ex.from; r <= ex.to; r++) flowField[cellIdx(0, r)]      = v;
+    if (ex.side === "bottom") for (let c = ex.from; c <= ex.to; c++) flowField[cellIdx(c, ROWS-1)] = v;
+    if (ex.side === "top")    for (let c = ex.from; c <= ex.to; c++) flowField[cellIdx(c, 0)]      = v;
+  }
+}
+applyExits();   // carve open exits, seal disabled ones, build the initial flow field
+
+// ---------------------------------------------------------------------------
+// Tunables
+// ---------------------------------------------------------------------------
+const NUM_PEOPLE   = 45;                 // less crowded than before
+const RADIUS       = 0.18 * PX_PER_M;    // ~0.18 m person radius (px)
+const BASE_SPEED   = 1.3 * PX_PER_M;     // ~1.3 m/s walking speed (px/s)
+const STUMBLE_RATE = 0.03;               // chance per contact per second
+const STUMBLE_TIME = 3.0;                // seconds stopped when stumbled
+const CONGEST_DIST = RADIUS * 4;         // neighbours within this count as "crowding"
+const CONGEST_COUNT = 3;                 // this many close neighbours => slowed + yellow
+const CONGEST_SPEED = 0.45;              // speed multiplier while crowded
+
+// ---------------------------------------------------------------------------
+// Canvas / state
+// ---------------------------------------------------------------------------
+const canvas = document.getElementById("canvas");
+canvas.width  = COLS * CELL;             // 780
+canvas.height = ROWS * CELL;             // 520
+const ctx = canvas.getContext("2d");
+const W = canvas.width, H = canvas.height;
+
+let people = [];
+let mode = "idle";                       // "idle" | "evacuating" | "done"
+let elapsed = 0;                         // current run's evacuation time (sim seconds)
+
+// Timelapse: the alarm plays the evacuation TIMELAPSE_RUNS times in a row, each
+// with a fresh random spread, sped up so it reads as a quick montage. Every
+// run's time is collected and averaged at the end.
+const TIMELAPSE_RUNS = 10;
+// Playback speed ramps from MIN_STEPS sim-steps per frame (slow, < 1 = slower
+// than real-time) up to MAX_STEPS over SLOW_INTRO seconds, so each run opens
+// slowly — clearly showing the fresh starting layout — then eases faster.
+const MIN_STEPS  = 0.35;                  // steps/frame at the very start of a run
+const MAX_STEPS  = 4;                     // steps/frame once fully ramped up
+const SLOW_INTRO = 2.5;                   // sim seconds over which the speed ramps up
+const SUB_DT     = 1 / 30;               // fixed sim step (stumble odds scale with dt, so unbiased)
+let runIndex = 0;                        // which run we're on (0-based)
+let runTimes = [];                       // completed run times (sim seconds)
+let stepAccumulator = 0;                 // carries the fractional part of steps-per-frame
+
+function isBlocked(x, y) {
+  const c = Math.floor(x / CELL), r = Math.floor(y / CELL);
+  if (r < 0 || r >= ROWS || c < 0 || c >= COLS) return false; // outside = open (exit side)
+  return grid[r][c] !== FLOOR;           // walls and obstacles both block
+}
+
+// Create one person at a random interior floor cell (never inside furniture).
+function makePerson() {
+  let x, y, guard = 0;
+  do {
+    x = (1 + Math.random() * (COLS - 2)) * CELL;
+    y = (1 + Math.random() * (ROWS - 2)) * CELL;
+  } while (isBlocked(x, y) && guard++ < 1000);
+  // ~35% just stand around (tiny shifts); the rest casually stroll about.
+  const still = Math.random() < 0.35;
+  const p = {
+    x, y,
+    homeX: x, homeY: y,                              // anchor the idle roaming
+    speed: BASE_SPEED * (0.8 + Math.random() * 0.4), // evacuation speed, 0.8x - 1.2x
+    stumbleLeft: 0,                                  // >0 means currently stumbled
+    crowd: 0,                                         // nearby-neighbour count this frame
+    dx: 0, dy: 0,                                     // last flow-field heading (reused once outside the grid)
+    // idle "personality"
+    idleStill: still,
+    roamRadius: still ? CELL * 0.15 : CELL * (2 + Math.random() * 1.5),
+    idleSpeed: BASE_SPEED * (still ? 0.12 : 0.30 + Math.random() * 0.15),
+    pauseLeft: Math.random() * (still ? 5 : 2),       // stagger when each first moves
+    roamX: x, roamY: y,                               // current casual destination
+    out: false                                        // has left the room
+  };
+  pickRoam(p);
+  return p;
+}
+
+// A fresh crowd of NUM_PEOPLE at random positions.
+function makePeople() {
+  const arr = [];
+  for (let i = 0; i < NUM_PEOPLE; i++) arr.push(makePerson());
+  return arr;
+}
+
+// Scatter the live (visible) crowd.
+function spawnPeople() { people = makePeople(); }
+
+// Choose a casual destination near a person's home spot (on a free cell).
+function pickRoam(p) {
+  for (let k = 0; k < 10; k++) {
+    const ang = Math.random() * Math.PI * 2;
+    const rad = Math.random() * p.roamRadius;
+    const rx = p.homeX + Math.cos(ang) * rad;
+    const ry = p.homeY + Math.sin(ang) * rad;
+    if (!isBlocked(rx, ry)) { p.roamX = rx; p.roamY = ry; return; }
+  }
+  p.roamX = p.homeX; p.roamY = p.homeY;
+}
+
+// ---------------------------------------------------------------------------
+// Update: idle — people casually stroll to a nearby spot, pause, then pick
+// another. "Still" people barely move and rest for long stretches, so the
+// room looks alive with a mix of standing and milling-about figures.
+// ---------------------------------------------------------------------------
+function updateIdle(crowd, dt) {
+  for (const p of crowd) {
+    if (p.pauseLeft > 0) { p.pauseLeft -= dt; continue; }   // standing for now
+    const dx = p.roamX - p.x, dy = p.roamY - p.y;
+    const d = Math.hypot(dx, dy);
+    if (d < 3) {
+      // arrived — rest a while, then choose a new casual destination
+      p.pauseLeft = p.idleStill ? 2 + Math.random() * 4 : 0.4 + Math.random() * 2;
+      pickRoam(p);
+      continue;
+    }
+    const step = p.idleSpeed * dt;
+    moveWithWalls(p, (dx / d) * step, (dy / d) * step);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Update: evacuating — follow the flow field, which already routes around
+// walls and furniture, toward whichever exit is nearest along a real path.
+// ---------------------------------------------------------------------------
+function updateEvacuating(crowd, dt) {
+  for (const p of crowd) {
+    if (p.out) continue;
+    if (p.stumbleLeft > 0) { p.stumbleLeft -= dt; continue; }
+
+    // Sample the flow direction at the person's current cell. Once they step
+    // beyond the perimeter (through the doorway) there's no cell, so reuse the
+    // last heading to carry them clear of the building.
+    const c = Math.floor(p.x / CELL), r = Math.floor(p.y / CELL);
+    const f = (c >= 0 && c < COLS && r >= 0 && r < ROWS) ? flowField[cellIdx(c, r)] : null;
+    if (f) { p.dx = f.x; p.dy = f.y; }
+
+    // Packed-in people (limited movement) shuffle along slower.
+    const speed = p.crowd >= CONGEST_COUNT ? p.speed * CONGEST_SPEED : p.speed;
+    const step = speed * dt;
+    moveWithWalls(p, p.dx * step, p.dy * step);
+
+    if (isOut(p)) p.out = true;
+  }
+}
+
+// True once a person has stepped beyond the perimeter (out a doorway).
+function isOut(p) {
+  return p.x > W + 6 || p.x < -6 || p.y > H + 6 || p.y < -6;
+}
+
+// Move a person by (dx,dy) but slide along walls/furniture per axis.
+function moveWithWalls(p, dx, dy) {
+  if (!isBlocked(p.x + dx, p.y)) p.x += dx;
+  if (!isBlocked(p.x, p.y + dy)) p.y += dy;
+}
+
+// ---------------------------------------------------------------------------
+// Stumbles + separation: overlapping people push apart and may trip.
+// ---------------------------------------------------------------------------
+function checkStumbles(crowd, dt, allowStumble) {
+  const minDist = RADIUS * 2;
+  for (const p of crowd) p.crowd = 0;            // recount crowding each frame
+  for (let i = 0; i < crowd.length; i++) {
+    const a = crowd[i];
+    if (a.out) continue;
+    for (let j = i + 1; j < crowd.length; j++) {
+      const b = crowd[j];
+      if (b.out) continue;
+      const dx = b.x - a.x, dy = b.y - a.y;
+      const dist = Math.hypot(dx, dy);
+      if (dist < CONGEST_DIST) { a.crowd++; b.crowd++; }
+      if (dist < minDist && dist > 0) {
+        const overlap = (minDist - dist) / 2;
+        const nx = dx / dist, ny = dy / dist;
+        if (!isBlocked(a.x - nx * overlap, a.y - ny * overlap)) { a.x -= nx * overlap; a.y -= ny * overlap; }
+        if (!isBlocked(b.x + nx * overlap, b.y + ny * overlap)) { b.x += nx * overlap; b.y += ny * overlap; }
+
+        if (allowStumble && Math.random() < STUMBLE_RATE * dt) {
+          const victim = Math.random() < 0.5 ? a : b;
+          if (victim.stumbleLeft <= 0) victim.stumbleLeft = STUMBLE_TIME;
+        }
+      }
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Draw
+// ---------------------------------------------------------------------------
+function roundRect(x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y,     x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x,     y + h, r);
+  ctx.arcTo(x,     y + h, x,     y,     r);
+  ctx.arcTo(x,     y,     x + w, y,     r);
+  ctx.closePath();
+}
+
+function draw() {
+  ctx.clearRect(0, 0, W, H);
+
+  // floor
+  ctx.fillStyle = getCss("--floor");
+  ctx.fillRect(0, 0, W, H);
+
+  // walls
+  ctx.fillStyle = getCss("--wall");
+  for (let r = 0; r < ROWS; r++)
+    for (let c = 0; c < COLS; c++)
+      if (grid[r][c] === WALL) ctx.fillRect(c * CELL, r * CELL, CELL, CELL);
+
+  // furniture
+  for (const o of obstacles) drawObstacle(o);
+
+  // exits
+  for (const e of exits) drawExit(e);
+
+  // people
+  for (const p of people) {
+    if (p.out) continue;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, RADIUS, 0, Math.PI * 2);
+    let color = "#3b82f6";                                   // normal
+    if (mode === "evacuating" && p.crowd >= CONGEST_COUNT) color = "#f1c40f"; // crowded / limited movement
+    if (p.stumbleLeft > 0)        color = "#e74c3c";         // stumbled (takes priority)
+    ctx.fillStyle = color;
+    ctx.fill();
+  }
+
+  // timelapse run counter overlay
+  if (mode === "evacuating") {
+    ctx.fillStyle = "rgba(0,0,0,0.55)";
+    ctx.fillRect(10, 10, 116, 30);
+    ctx.fillStyle = "#fff";
+    ctx.font = "bold 16px system-ui, sans-serif";
+    ctx.textAlign = "left"; ctx.textBaseline = "middle";
+    ctx.fillText("Run " + (runIndex + 1) + " / " + TIMELAPSE_RUNS, 20, 26);
+  }
+}
+
+function drawObstacle(o) {
+  const x = o.c0 * CELL, y = o.r0 * CELL, w = o.w * CELL, h = o.h * CELL;
+  const colors = { sofa: "#8d6e63", table: "#b08968", chair: "#a1887f", shelf: "#6d4c41" };
+  ctx.fillStyle = colors[o.type] || "#8d6e63";
+  roundRect(x + 2, y + 2, w - 4, h - 4, 6);
+  ctx.fill();
+  // a lighter inset to suggest a cushion / surface
+  ctx.fillStyle = "rgba(255,255,255,0.18)";
+  roundRect(x + 6, y + 6, w - 12, h - 12, 4);
+  ctx.fill();
+  if (o.label) {
+    ctx.fillStyle = "rgba(255,255,255,0.9)";
+    ctx.font = "bold 11px system-ui, sans-serif";
+    ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.fillText(o.label, x + w / 2, y + h / 2);
+  }
+}
+
+// Pixel rectangle of an exit's doorway band (also used for click hit-testing).
+function exitRect(e) {
+  const vertical = (e.side === "right" || e.side === "left"); // label runs along Y
+  if (vertical) {
+    const y = e.from * CELL, h = (e.to - e.from + 1) * CELL;
+    const x = e.side === "right" ? (COLS - 1) * CELL : 0;
+    return { x, y, w: CELL, h, vertical };
+  }
+  const x = e.from * CELL, w = (e.to - e.from + 1) * CELL;
+  const y = e.side === "bottom" ? (ROWS - 1) * CELL : 0;
+  return { x, y, w, h: CELL, vertical };
+}
+
+function drawExit(e) {
+  const { x, y, w, h, vertical } = exitRect(e);
+  if (e.enabled) {
+    ctx.fillStyle = getCss("--exit");
+    ctx.fillRect(x, y, w, h);
+    drawExitLabel(x + w / 2, y + h / 2, vertical, "EXIT", "#0a3d22");
+  } else {
+    // sealed doorway: dark red with a barred look
+    ctx.fillStyle = "#8e2b2b";
+    ctx.fillRect(x, y, w, h);
+    ctx.strokeStyle = "rgba(255,255,255,0.3)";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(x, y); ctx.lineTo(x + w, y + h);
+    ctx.moveTo(x + w, y); ctx.lineTo(x, y + h);
+    ctx.stroke();
+    drawExitLabel(x + w / 2, y + h / 2, vertical, "CLOSED", "#ffe2e2");
+  }
+}
+
+function drawExitLabel(cx, cy, rotated, text, color) {
+  ctx.save();
+  ctx.translate(cx, cy);
+  if (rotated) ctx.rotate(Math.PI / 2);
+  ctx.fillStyle = color;
+  ctx.font = "bold 12px system-ui, sans-serif";
+  ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  ctx.fillText(text, 0, 1);
+  ctx.restore();
+}
+
+function getCss(name) {
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+}
+
+// ---------------------------------------------------------------------------
+// Main loop
+// ---------------------------------------------------------------------------
+let last = performance.now();
+function loop(now) {
+  let dt = (now - last) / 1000;
+  last = now;
+  if (dt > 0.05) dt = 0.05;        // clamp to avoid big jumps after a stall
+
+  if (mode === "idle") {
+    updateIdle(people, dt);
+    checkStumbles(people, dt, false);
+  } else if (mode === "evacuating") {
+    // Each run starts slow so you can clearly see the fresh starting layout,
+    // then ramps up. Fractional steps/frame are carried over via an accumulator
+    // so the opening can run slower than one step per frame.
+    const ramp = Math.min(1, elapsed / SLOW_INTRO);
+    stepAccumulator += MIN_STEPS + (MAX_STEPS - MIN_STEPS) * ramp;
+    const steps = Math.floor(stepAccumulator);
+    stepAccumulator -= steps;
+    for (let s = 0; s < steps; s++) {
+      elapsed += SUB_DT;
+      updateEvacuating(people, SUB_DT);
+      checkStumbles(people, SUB_DT, true);
+      if (remainingCount() === 0) { onRunComplete(); break; }
+    }
+  }
+
+  draw();
+  updateReadout();
+  requestAnimationFrame(loop);
+}
+
+function remainingCount() {
+  let n = 0;
+  for (const p of people) if (!p.out) n++;
+  return n;
+}
+
+// ---------------------------------------------------------------------------
+// Timelapse control: a run just finished — record its time, then either start
+// the next fresh run or, after the last one, report the average. Each run uses
+// the same movement, stumbling and crowding rules, so the average is real.
+// ---------------------------------------------------------------------------
+function onRunComplete() {
+  runTimes.push(elapsed);
+  runIndex++;
+  if (runIndex < TIMELAPSE_RUNS) {
+    spawnPeople();          // fresh random spread for the next run
+    elapsed = 0;
+    stepAccumulator = 0;    // restart the slow opening
+    showProgress();         // mode stays "evacuating"
+  } else {
+    finishTimelapse();
+  }
+}
+
+function finishTimelapse() {
+  mode = "done";
+  const sum = runTimes.reduce((a, b) => a + b, 0);
+  const avg = sum / runTimes.length;
+  const min = Math.min(...runTimes), max = Math.max(...runTimes);
+  analysisEl.innerHTML =
+    "📊 Average evacuation: <strong>" + avg.toFixed(1) + " s</strong>" +
+    "<span class='range'>over " + TIMELAPSE_RUNS + " runs with this exit layout · " +
+    "fastest " + min.toFixed(1) + " s · slowest " + max.toFixed(1) + " s</span>";
+  bannerEl.textContent = "✅ Timelapse complete — " + TIMELAPSE_RUNS + " evacuations simulated";
+  bannerEl.classList.add("show");
+}
+
+function showProgress() {
+  analysisEl.classList.add("show");
+  analysisEl.innerHTML = "⏱ Timelapse running — run <strong>" + (runIndex + 1) + " / " + TIMELAPSE_RUNS + "</strong>";
+}
+
+// ---------------------------------------------------------------------------
+// Readout / UI
+// ---------------------------------------------------------------------------
+const remainingEl = document.getElementById("remaining");
+const timerEl     = document.getElementById("timer");
+const bannerEl    = document.getElementById("banner");
+const analysisEl  = document.getElementById("analysis");
+const alarmBtn    = document.getElementById("alarmBtn");
+const flashEl     = document.getElementById("flash");
+
+function updateReadout() {
+  remainingEl.textContent = remainingCount();
+  timerEl.textContent = elapsed.toFixed(1) + "s";
+}
+
+// ---------------------------------------------------------------------------
+// Alarm: play the evacuation as a sped-up timelapse, TIMELAPSE_RUNS times in a
+// row, each with a fresh random spread, then report the average evacuation time.
+// ---------------------------------------------------------------------------
+function soundAlarm() {
+  if (mode !== "idle") return;
+  beep();
+  edgeFlash();
+  alarmBtn.disabled = true;
+  bannerEl.classList.remove("show");
+
+  runIndex = 0;
+  runTimes = [];
+  elapsed = 0;
+  stepAccumulator = 0;
+  spawnPeople();          // fresh random spread for the first run
+  showProgress();
+  mode = "evacuating";
+}
+
+function edgeFlash() {
+  const times = [0, 140, 260, 400, 520, 700];
+  times.forEach((t, i) => setTimeout(() => flashEl.classList.toggle("on", i % 2 === 0), t));
+}
+
+// Short two-tone beep via Web Audio API (no audio files).
+function beep() {
+  try {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    const actx = new AC();
+    const now = actx.currentTime;
+    [880, 1100].forEach((freq, i) => {
+      const osc = actx.createOscillator();
+      const gain = actx.createGain();
+      osc.type = "square";
+      osc.frequency.value = freq;
+      const t = now + i * 0.18;
+      gain.gain.setValueAtTime(0.0001, t);
+      gain.gain.exponentialRampToValueAtTime(0.25, t + 0.01);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.16);
+      osc.connect(gain).connect(actx.destination);
+      osc.start(t);
+      osc.stop(t + 0.18);
+    });
+    setTimeout(() => actx.close(), 800);
+  } catch (e) { /* audio blocked — simulation still runs */ }
+}
+
+// ---------------------------------------------------------------------------
+// Reset: re-scatter, reset timer, back to idle.
+// ---------------------------------------------------------------------------
+function reset() {
+  spawnPeople();
+  mode = "idle";
+  elapsed = 0;
+  alarmBtn.disabled = false;
+  bannerEl.classList.remove("show");
+  analysisEl.classList.remove("show");
+  flashEl.classList.remove("on");
+}
+
+alarmBtn.addEventListener("click", soundAlarm);
+document.getElementById("resetBtn").addEventListener("click", reset);
+
+// ---------------------------------------------------------------------------
+// Click an exit (before the alarm) to open/close it. The room must keep at
+// least one open exit, so the last one can't be closed.
+// ---------------------------------------------------------------------------
+function canvasPoint(evt) {
+  const rect = canvas.getBoundingClientRect();
+  return {
+    x: (evt.clientX - rect.left) * (canvas.width  / rect.width),
+    y: (evt.clientY - rect.top)  * (canvas.height / rect.height)
+  };
+}
+
+function exitAtPoint(x, y) {
+  // Slack of ~22 on-screen px, converted to canvas units, so the narrow exits
+  // stay easy to tap even when the canvas is scaled down on a phone.
+  const rect = canvas.getBoundingClientRect();
+  const pad = 22 * (canvas.width / (rect.width || canvas.width));
+  for (const e of exits) {
+    const r = exitRect(e);
+    if (x >= r.x - pad && x <= r.x + r.w + pad && y >= r.y - pad && y <= r.y + r.h + pad) return e;
+  }
+  return null;
+}
+
+canvas.addEventListener("click", evt => {
+  if (mode !== "idle") return;                 // only configurable before the alarm
+  const { x, y } = canvasPoint(evt);
+  const e = exitAtPoint(x, y);
+  if (!e) return;
+  const openCount = exits.filter(ex => ex.enabled).length;
+  if (e.enabled && openCount <= 1) return;      // keep at least one way out
+  e.enabled = !e.enabled;
+  applyExits();                                 // re-carve / re-seal + reroute
+});
+
+// Pointer cursor over a togglable exit while idle.
+canvas.addEventListener("mousemove", evt => {
+  const { x, y } = canvasPoint(evt);
+  canvas.style.cursor = (mode === "idle" && exitAtPoint(x, y)) ? "pointer" : "default";
+});
+
+// ---------------------------------------------------------------------------
+// Start
+// ---------------------------------------------------------------------------
+spawnPeople();
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
